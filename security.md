@@ -115,16 +115,16 @@ Note that Pravega operator uses `/etc/auth-passwd-volume` as the mounting direct
 
 # Authorization
 ## General authorization settings 
-### 1)Configuring Authorization Rules
-(Describe how to configure authorization for users or processes)
-### 2)Default Authorizations
-(Default account privilege assignments)
-### 3)External Authorization Associations
-(How to connect authorization to LDAP or AD-based subjects)
-### 4)Entitlement Export
-(Describe how a user would generate a report of authorizations)
-### 5)Actions Not Requiring Authorization
-(Describe actions which may be allowed without explicit authorization
+Pravega will implement a pluggable authorization model. The authorization kicks in only with interactions with the controller through GRPC or REST. Once the request is authorized, controller generates a token. This token will be presented to the SegmentStore. Once the token is validated, SegmentStore will assume that the interactions have already been approved by the controller. The authorizer model returns whether the user is authorized as well as a string which represents the user identity.  Advantages: This will mean that we do not have authorization happening twice, once with the controller and then with segmentstore. This will also take the authorization part away from the performance critical path.
+
+### a. Token format
+Token is used to share authorization information between Pravega controller and SegmentStore. The token follows the JWT (JSON Web Token) format closely. https://tools.ietf.org/html/rfc7519 It is signed by a symmetric key shared between controller and SegmentStore. More details about how JWT tokens are signed can be found here: https://tools.ietf.org/html/rfc7515. A token consists of the resource identifier. SegmentStore has the responsibility of validating the token. It also converts the token from controller primitives (stream/scope) to SegmentStore primitives (segments). SegmentStore validates signature of this token, validates that the resource id requested matches the one specified in the token, validates the lifetime of the token and if it matches, performs the given operation.
+
+### b. Why JWT
+Jason Web Token format and implementation gives an efficient way of signing and encrypting claim based tokens. This is a widely used format and has advanced features in-built like token expiry etc which will be useful in the context of Pravega. Please refer to JWT specs for more details.
+
+### c. Token lifetime and revocation
+Tokens are short lived. Controller controls their lifetime using the 'exp' claim. https://tools.ietf.org/html/rfc7519#section-4.1.4. The expiration time is checked before start of a given SegmentStore operation. In case an expired token is observed, SegmentStore returns appropriate error to the client. The client can interact with controller and receive a new token after controller reauthenticates it.
 
 ## Role-Based Access Control (RBAC) 
 ## Setting up RBAC for Pravega operator
@@ -227,5 +227,196 @@ pravega-pravega-segmentstore-2                1/1       Running   0          29m
 ```
 # Network security
 ### 1)Network Exposure
+(we need to mention the ports and protocols in use and default execution mode)
 ### 2)Communication Security Settings
+(we need to mention Configuration options to enable endpoint validation)
 ### 3)Firewall Settings
+(we need to mention How to configure or verify the functionality of the product’s firewall)
+
+# Data Security
+### 1)Data Storage Security Settings
+(we need to mention capabilities for securing application and customer data)
+
+### 2)Data at Rest Encryption
+#### Encryption of data in Tier 1
+Pravega uses Apache BookKeeper as Tier 1 implementation. Apache Bookkeeper currently does not support encryption of data written to disk.
+
+#### Encryption of data in Tier 2¶
+Pravega can work with different storage options for Tier 2. To use any specific storage option, it is necessary to implement a storage interface. We currently have the following options implemented:
+HDFS
+Extended S3
+File system (NFS).
+
+Pravega does not encrypt data before storing it in Tier 2. Consequently, Tier 2 encryption is only an option in the case the storage system provides it natively, and as such, needs to be configured directly in the storage system, not via Pravega.
+
+### 3)Data in Flight Encryption
+Pravega ensures that all the data in flight can be passed by applying encryption. The different channels present in data integrity section can be configured with TLS and encryption can be enabled for them.
+ 
+### 4)Data Sanitization
+(we need to mention capabilities for securely sanitizing (erasing) customer data)
+### 5)Data Integrity
+
+Client can communicate with Pravega in a more secure way using TLS. To enable this feature, you will first need to
+create secrets for Controller and Segment Store to make the relevant, sensible files available to the backend pods.
+
+```
+$ kubectl create secret generic controller-tls \
+  --from-file=./controller01.pem \
+  --from-file=./ca-cert \
+  --from-file=./controller01.key.pem \
+  --from-file=./controller01.jks \
+  --from-file=./password
+```
+
+```
+$ kubectl create secret generic segmentstore-tls \
+  --from-file=./segmentstore01.pem \
+  --from-file=./ca-cert \
+  --from-file=./segmentstore01.key.pem
+```
+
+Then specify the secret names in the `tls` block and the TLS parameters in the `options` block.
+
+```
+apiVersion: "pravega.pravega.io/v1alpha1"
+kind: "PravegaCluster"
+metadata:
+  name: "example"
+spec:
+  tls:
+    static:
+      controllerSecret: "controller-tls"
+      segmentStoreSecret: "segmentstore-tls"
+...
+  pravega:
+    options:
+      controller.auth.tlsEnabled: "true"
+      controller.auth.tlsCertFile: "/etc/secret-volume/controller01.pem"
+      controller.auth.tlsKeyFile: "/etc/secret-volume/controller01.key.pem"
+      pravegaservice.enableTls: "true"
+      pravegaservice.certFile: "/etc/secret-volume/segmentStore01.pem"
+      pravegaservice.keyFile: "/etc/secret-volume/segmentStore01.key.pem"
+...
+```
+
+Note that Pravega operator uses `/etc/secret-volume` as the mounting directory for secrets.
+
+For more security configurations, check [here](https://github.com/pravega/pravega/blob/master/documentation/src/docs/security/pravega-security-configurations.md).
+
+## Security Configuration Parameters in Distributed Mode
+
+In the distributed mode, Controllers and Segment Stores are configured individually. The following sub-sections describe
+their Transport Layer Security (TLS) and auth (short for authentication and authorization) parameters.
+
+
+### Segment Store
+
+|Parameter|Description|Default Value|Feature|
+|---------|-------|-------------|------------|
+| `pravegaservice.enableTls` | Whether to enable TLS for client-server communications. | False | TLS |
+| `pravegaservice.certFile` | Path of the X.509 PEM-encoded server certificate file for the service. | Empty | TLS |
+| `pravegaservice.keyFile` | Path of the PEM-encoded private key file for the service. | Empty | TLS |
+| `pravegaservice.secureZK` | Whether to enable TLS for communication with Apache Zookeeper. | False | TLS |
+| `pravegaservice.zkTrustStore` | Path of the truststore file in `.jks` format for TLS connections with Apache Zookeeer. | Empty | TLS |
+| `pravegaservice.zkTrustStorePasswordPath` | Path of the file containing the password of the truststore used for TLS connections with Apache Zookeeper. | Empty | TLS |
+| `autoScale.tlsEnabled` | Whether to enable TLS for internal communication with the Controllers. | False | TLS |
+| `autoScale.tlsCertFile` | Path of the PEM-encoded X.509 certificate file used for TLS connections with the Controllers. | Empty | TLS |
+| `autoScale.validateHostName` | Whether to enable hostname verification for TLS connections with the Controllers. | True | TLS |
+| `autoScale.authEnabled` | Whether to enable authentication and authorization for internal communications with the Controllers. | False | Auth |
+| `autoScale.tokenSigningKey` | The key used for signing the delegation tokens. | Empty | Auth |
+| `bookkeeper.tlsEnabled` | Whether to enable TLS for communication with Apache Bookkeeper. | False | TLS |
+| `bookkeeper.tlsTrustStorePath` | Path of the truststore file in `.jks` format for TLS connections with Apache Bookkeeper. | Empty | TLS |
+
+
+### Controller
+
+|Parameter|Details|Default Value|Feature|
+|---------|-------|-------------|-------|
+| `controller.auth.tlsEnabled` | Whether to enable TLS for client-server communication. | False | TLS |
+| `controller.auth.tlsCertFile` | Path of the X.509 PEM-encoded server certificate file for the service. | Empty | TLS |
+| `controller.auth.tlsKeyFile` | Path of the PEM-encoded private key file for the service. | Empty | TLS |
+| `controller.auth.tlsTrustStore` | Path of the PEM-encoded truststore file for TLS connections with Segment Stores. | Empty | TLS |
+| `controller.rest.tlsKeyStoreFile` | Path of the keystore file in `.jks` for the REST interface. | Empty | TLS |
+| `controller.rest.tlsKeyStorePasswordFile` | Path of the file containing the keystore password for the REST interface. | Empty | TLS |
+| `controller.zk.secureConnection` | Whether to enable TLS for communication with Apache Zookeeper| False | TLS |
+| `controller.zk.tlsTrustStoreFile` | Path of the truststore file in `.jks` format for TLS connections with Apache Zookeeer. | Empty | TLS |
+| `controller.zk.tlsTrustStorePasswordFile` | Path of the file containing the password of the truststore used for TLS connections with Apache Zookeeper. | Empty | TLS |
+| `controller.auth.enabled` | Whether to enable authentication and authorization for clients. | False | Auth |
+| `controller.auth.userPasswordFile` | Path of the file containing user credentials and ACLs, for the PasswordAuthHandler.| Empty | Auth |
+| `controller.auth.tokenSigningKey` | Key used to sign the delegation tokens for Segment Stores. | Empty | Auth |
+
+
+## Security Configurations in Standalone Mode
+
+For ease of use, Pravega standalone mode abstracts away some of the configuration parameters of distributed mode. As a result, it has
+fewer security configuration parameters to configure.
+
+
+|Parameter|Details|Default Value|Feature|
+|---------|-------|-------------|-------|
+| `singlenode.enableTls` | Whether to enable TLS for client-server communications. | False | TLS |
+| `singlenode.certFile` | Path of the X.509 PEM-encoded server certificate file for the server. |Empty| TLS |
+| `singlenode.keyFile` | Path of the PEM-encoded private key file for the service. | Empty | TLS |
+| `singlenode.keyStoreJKS` | Path of the keystore file in `.jks` for the REST interface. | Empty | TLS |
+| `singlenode.keyStoreJKSPasswordFile` |Path of the file containing the keystore password for the REST interface. | Empty | TLS |
+| `singlenode.trustStoreJKS` | Path of the truststore file for internal TLS connections. | Empty | TLS |
+| `singlenode.enableAuth` | Whether to enable authentication and authorization for clients. |False| Auth |
+| `singlenode.passwdFile` | Path of the file containing user credentials and ACLs, for the PasswordAuthHandler. |Empty| Auth |
+| `singlenode.userName` | The default username used for internal communication between Segment Store and Controller. | Empty| Auth |
+| `singlenode.passwd` | The default password used for internal communication between Segment Store and Controller. | Empty| Auth |
+
+### 6)Other Data Security Features
+(we need to mention Document other data security features or capabilities, when available)
+
+# Cryptography
+### 1)Cryptographic Configuration Options
+(Describe capabilities and options for using cryptography in the product.)
+### 2)Certified Cryptographic Modules
+(Describe capabilities for use of FIPS 140-2 validated cryptographic modules and settings)
+### 3)Certificate Management
+(Describe settings and options for using certificates in the product)
+### 4)Regulatory Information
+(Provide references to export compliance and other regulatory information customers should be aware of)
+
+# Auditing and Logging
+### 1)Logs
+(Describe log location(s) and usage)
+### 2)Log Management
+(Describe options for managing logs in the system.)
+### 3)Log Protection
+(Describe capabilities for securing security-sensitive log contents)
+### 4)Logging Format
+(Describe the format of logs, including timestamp formats, special labels or indicators, and other details customers will need to properly understand security logs.)
+### 5)Alerting
+(Describe features and options for generating alerts)
+
+# Physical Security
+### 1)Physical Interfaces
+(Describe physical ports and interfaces)
+### 2)Physical Security Options
+(Describe physical security controls in place or that can be applied by customers)
+### 3)Customer Service Access
+(Describe necessary access to physical devices restricted for service use vs customer use)
+### 4)Tamper Evidence and Resistance
+(Describe mechanisms in place or that can be applied by customers to protect access to the product physically)
+### 5)Statement of Volatility
+(Provide a reference to or copy of any Statements of Volatility)
+
+# Serviceability
+### 1)Maintenance Aids
+(Describe accounts, tools, and other functionality intended as “Maintenance Aids")
+### 2)Responsible Service Use by Dell
+(Describe expectations around service access by Dell)
+### 3)Data Shared with Dell
+(Identify the types of information transmitted to Dell via a ‘call home’ or serviceability tool that is part of the Dell product)
+### 4)Security Updates and Patching
+(Describe the security patching and update policy and behavior and settings that relate to this functionality (if available))
+### 5)Customer Requirements for Updates
+(Describe actions customers must take with respect to security updates)
+
+# Code/Product Authenticity and Integrity
+### 1)Code/Product Authenticity and Integrity
+(Identify how the authenticity and integrity of the distributed product and/or its code (software and firmware) is maintained)
+### 2)Code/Product Verification
+(Describe how a customer can verify the authentication and integrity of the distributed product)
+    
