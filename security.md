@@ -1,7 +1,7 @@
 # Security Controls Map
-This is a diagram which depicts how security works in pravega. (need more help for this) 
+Diagram which depicts how security works in pravega. (need more help for this) 
 # Authentication
-This section describes the various default settings and configuration options for how users or processes authenticate to the product subsystems.
+This section describes the various default settings and configuration options for how users or processes authenticate to the product subsystems.\
 Pravega supports pluggable authentication and authorization, The custom implementation performs the implementation of the AuthHandler interface, Administrators and users are allowed to implement their own Authorization/Authentication plugins. Multiple plugins of such kind can exist together. The implementation of plugin follows the Java Service Loader approach. The required Jars for the custom implementation needs to be located in the CLASSPATH to enable the access for Pravega Controller for implementation.
 ## Login Security Settings 
 Login security including the topics of login banners, usually presenting legal disclaimers and other usage and privacy policies, failed login behaviour, and account lockout options. (need more help for this)
@@ -115,16 +115,16 @@ Note that Pravega operator uses `/etc/auth-passwd-volume` as the mounting direct
 
 # Authorization
 ## General authorization settings 
-Pravega will implement a pluggable authorization model. The authorization kicks in only with interactions with the controller through GRPC or REST. Once the request is authorized, controller generates a token. This token will be presented to the SegmentStore. Once the token is validated, SegmentStore will assume that the interactions have already been approved by the controller. The authorizer model returns whether the user is authorized as well as a string which represents the user identity.  Advantages: This will mean that we do not have authorization happening twice, once with the controller and then with segmentstore. This will also take the authorization part away from the performance critical path.
+Pravega implement a pluggable authorization model. The authorization kicks in only with interactions with the controller through GRPC or REST. Once the request is authorized, controller generates a token. This token will be presented to the SegmentStore. Once the token is validated, SegmentStore will assume that the interactions have already been approved by the controller. The authorizer model returns whether the user is authorized as well as a string which represents the user identity.  Advantage of this will mean that we do not have authorization happening twice, once with the controller and then with segmentstore. This will also take the authorization part away from the performance critical path.
 
 ### a. Token format
-Token is used to share authorization information between Pravega controller and SegmentStore. The token follows the JWT (JSON Web Token) format closely. https://tools.ietf.org/html/rfc7519 It is signed by a symmetric key shared between controller and SegmentStore. More details about how JWT tokens are signed can be found here: https://tools.ietf.org/html/rfc7515. A token consists of the resource identifier. SegmentStore has the responsibility of validating the token. It also converts the token from controller primitives (stream/scope) to SegmentStore primitives (segments). SegmentStore validates signature of this token, validates that the resource id requested matches the one specified in the token, validates the lifetime of the token and if it matches, performs the given operation.
+Token is used to share authorization information between Pravega controller and SegmentStore. The token follows the JWT (JSON Web Token) format closely. [https://tools.ietf.org/html/rfc7519](https://tools.ietf.org/html/rfc7519) It is signed by a symmetric key shared between controller and SegmentStore. More details about how JWT tokens are signed can be found here: [https://tools.ietf.org/html/rfc7515](https://tools.ietf.org/html/rfc7515). A token consists of the resource identifier. SegmentStore has the responsibility of validating the token. It also converts the token from controller primitives (stream/scope) to SegmentStore primitives (segments). SegmentStore validates signature of this token, validates that the resource id requested matches the one specified in the token, validates the lifetime of the token and if it matches, performs the given operation.
 
 ### b. Why JWT
-Jason Web Token format and implementation gives an efficient way of signing and encrypting claim based tokens. This is a widely used format and has advanced features in-built like token expiry etc which will be useful in the context of Pravega. Please refer to JWT specs for more details.
+Jason Web Token format and implementation gives an efficient way of signing and encrypting claim based tokens. This is a widely used format and has advanced features in-built like token expiry etc which will be useful in the context of Pravega.
 
 ### c. Token lifetime and revocation
-Tokens are short lived. Controller controls their lifetime using the 'exp' claim. https://tools.ietf.org/html/rfc7519#section-4.1.4. The expiration time is checked before start of a given SegmentStore operation. In case an expired token is observed, SegmentStore returns appropriate error to the client. The client can interact with controller and receive a new token after controller reauthenticates it.
+Tokens are short lived. Controller controls their lifetime using the 'exp' claim. [https://tools.ietf.org/html/rfc7519#section-4.1.4](https://tools.ietf.org/html/rfc7519#section-4.1.4). The expiration time is checked before start of a given SegmentStore operation. In case an expired token is observed, SegmentStore returns appropriate error to the client. The client can interact with controller and receive a new token after controller reauthenticates it.
 
 ## Role-Based Access Control (RBAC) 
 ## Setting up RBAC for Pravega operator
